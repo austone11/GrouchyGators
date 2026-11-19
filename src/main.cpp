@@ -41,7 +41,7 @@ vex::motor cas_lift1 = motor(PORT3, false);
 vex::motor cas_lift2 = motor(PORT9, true);
 vex::motor_group cascade_group = motor_group(cas_lift1, cas_lift2);
 
-vex::motor intake = motor(PORT12);
+vex::motor intake = motor(PORT2);
 
 inertial inertialSensor = inertial(
     PORT6,
@@ -66,14 +66,15 @@ bool cas_rev = false;
 void customDisplay(){
     while (true)
     {
-        Controller.Screen.setCursor(0,3);
-        Controller.Screen.print("Battery: %damps", Brain.Battery.current());
+        //Controller.Screen.setCursor(0,3);
+        //Controller.Screen.print("Battery: %damps", Brain.Battery.current());
 
         this_thread::sleep_for(100);
     }
     
 }
 
+bool ignoreStopCas = false;
 void cascadeLift(){
     cascade_group.setVelocity(300, percent);
     
@@ -81,13 +82,17 @@ void cascadeLift(){
     {
         if(cas_for and cascade_group.position(degrees) <= CONFIG_CAS_MAX){
             cascade_group.spin(forward);
+
         }else{
             if (cas_rev and cascade_group.position(degrees) > CONFIG_CAS_MIN)
             {
                 cascade_group.spin(reverse);
             }else{
 
-                cascade_group.stop(brake);
+                if(not ignoreStopCas){
+                    cascade_group.stop(brake);
+                }
+                
 
             }
         }
@@ -100,16 +105,20 @@ void banch(){
     BanchControlMotor.setBrake(brake);
 
     BanchMotor.setVelocity(100, percent);
+    intake.setVelocity(200, percent);
 
     while (true)
     {
         if(banch_in){
             BanchMotor.spin(forward);
+            intake.spin(reverse);
         }else{
             if(banch_out){
                 BanchMotor.spin(reverse);
+                intake.spin(forward);
             }else{
                 BanchMotor.stop();
+                intake.stop();
             }
         }
         this_thread::sleep_for(10);
@@ -122,12 +131,24 @@ void banch90(){
     BanchControlMotor.setVelocity(30, percent);
     BanchControlMotor.spinToPosition(320, degrees, true);
 
+    if(cascade_group.position(degrees) < 200){
+        ignoreStopCas = true;
+        cascade_group.spinFor(forward, 360, degrees, true);
+        ignoreStopCas = false;
+    }
+
     return;
 }
 
 void banch110(){
     BanchControlMotor.setVelocity(30, percent);
     BanchControlMotor.spinToPosition(390, degrees, true);
+
+    if(cascade_group.position(degrees) < 200){
+        ignoreStopCas = true;
+        cascade_group.spinFor(forward, 360, degrees, true);
+        ignoreStopCas = false;
+    }
 
     return;
 }
@@ -166,7 +187,7 @@ void drive(){
     {
         Controller.Screen.clearScreen();
         Controller.Screen.setCursor(0,0);
-        Controller.Screen.print( "%.2f", inertialSensor.angle(deg));
+        //Controller.Screen.print( "%.2f", inertialSensor.angle(deg));
 
         cas_for = Controller.ButtonR1.pressing();
         cas_rev = Controller.ButtonR2.pressing();
@@ -197,29 +218,93 @@ vex::aivision gg_AI = aivision(PORT5);
 void autonomous(){
     //github test
 
-    bool hasPin = true;
+    bool hasPin = true; // Start with a pin. 
     bool hasCup = false;
+
+    //error = 160 - obj.centerX
+    //turn_speed = 0.3 * error   # kP = 0.3
+
     gg_AI.modelDetection(true);
     
     while (!gg_AI.installed()){
-        Controller.rumble("-.-");
-        wait(500, msec);
+        wait(10, msec);
     }
 
     Controller.Screen.print("AUTON", 50, 400);
     
+    // Going to use P Controller
+    /*
+        Order:
+            Start out with our pin.
+            Search for the AprilTags of the goals.
+            Locate, use P controller turn and move towards.
+            Drop our pin.
+
+            Set hasPin var to false.
+            repeat and that should influence the next loop.
+
+    */
 
 
     while(true){
 
-        gg_AI.takeSnapshot(vex::aivision::ALL_TAGS);
+        if(not hasPin){
 
-        if(gg_AI.objectCount > 0){
-            Controller.rumble(".");
+            gg_AI.takeSnapshot(vex::aivision::ALL_AIOBJS); // Search for tags because we have a pin.
+            while(gg_AI.objectCount <= 0){
+
+                wait(20,msec);
+
+                gg_AI.takeSnapshot(vex::aivision::ALL_AIOBJS);
+                Controller.Screen.clearScreen();
+                Controller.Screen.setCursor(1,1);
+                Controller.Screen.print('looking for objects');
+
+            }
+
+
+            if(gg_AI.objectCount > 0){
+
+                Controller.Screen.clearScreen();
+                Controller.Screen.setCursor(1,1);
+                Controller.Screen.print(gg_AI.objects[0].className);
+
+                gg_drivetrain.drive(reverse);
+
+                intake.setVelocity(200, percent);
+                BanchMotor.setVelocity(200, percent);
+                intake.spin(reverse);
+
+                BanchMotor.spin(forward);
+
+            }else{
+                BanchMotor.setVelocity(200, percent);
+                gg_drivetrain.stop();
+                intake.stop();
+
+                BanchMotor.stop();
+            }
+
         }
 
-        wait(100, msec);
+        if(hasPin){
 
+            // Id 3 = Blue goal 2
+            // Id 2 = Blue goal 1
+
+            gg_AI.takeSnapshot(vex::aivision::ALL_TAGS); // Search for tags because we have a pin.
+            while(gg_AI.objectCount <= 0){
+
+                wait(20,msec);
+
+                gg_AI.takeSnapshot(vex::aivision::ALL_TAGS);
+                Controller.Screen.clearScreen();
+                Controller.Screen.setCursor(1,1);
+                Controller.Screen.print('looking for objects');
+
+            }
+
+        }
     }
     
 }
